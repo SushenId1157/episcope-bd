@@ -1,0 +1,46 @@
+# --- Secrets (PRV-1: the hashing salt must live outside the repository) ---
+.env
+*.salt
+secrets/
+*token*
+*credential*
+
+# --- Data (H1: no data files above 50 MB in the repository) ---
+data/
+lake/
+raw_public/
+raw_synthetic/
+*.parquet
+*.crc
+_SUCCESS
+
+# Block bulk data formats, but keep the small aggregated dashboard exports,
+# the path config and the ingestion metadata sidecars (VIS-4, ING-1).
+*.geojson
+*.topojson
+*.csv
+*.json
+!dashboard/data/*.geojson
+!dashboard/data/*.topojson
+!dashboard/data/*.csv
+!dashboard/data/*.json
+!config/*.json
+!docs/**/*.csv
+!**/*.meta.json
+!package.json
+!package-lock.json
+
+# --- Spark / Python ---
+spark-warehouse/
+metastore_db/
+derby.log
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.pytest_cache/
+.venv/
+*.log
+
+# --- OS ---
+.DS_Store
+Thumbs.db
