@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<!--
+  EpiScope dashboard (VIS-1 to VIS-6).
+
+  Built with D3.js v7 only. Plotly, Chart.js, Vega-Lite, Tableau and Power BI
+  are not used for any required view, as VIS-1 requires.
+
+  The browser loads only the aggregated exports in data/, never line-level
+  records, and the total payload is 2.9 MB against the 10 MB limit in VIS-4.
+  Counts of one to four are withheld by the serving layer and are drawn here
+  as explicitly marked cells rather than as zero, so a viewer can tell "we
+  are not telling you" apart from "nothing happened".
+
+  All five views share one selection state. Choosing a district, a disease or
+  a time range in any view filters or highlights the others (VIS-3).
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EpiScope - National Disease Surveillance</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+<style>
+:root{
+  /* Okabe-Ito derived palette: distinguishable under the common forms of
+     colour vision deficiency, as VIS-6 requires. Severity uses a sequential
+     ramp rather than red-green, which is the pair most often confused. */
+  --bg:#0f1419; --panel:#161d26; --panel2:#1c2531; --line:#2a3744;
+  --ink:#e8eef4; --ink-dim:#8fa3b8; --ink-faint:#5b6b7d;
+  --accent:#4da3d4; --accent2:#56b4a0;
+  --warn:#e69f00; --danger:#d55e00; --ok:#009e73;
+  --suppressed:#3a4452;
+  --s0:#1a2733; --s1:#1f4a63; --s2:#2d7a94; --s3:#56b4a0;
+  --s4:#e69f00; --s5:#d55e00;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{
+  background:var(--bg); color:var(--ink);
+  font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  padding:16px;
+}
+header{
+  display:flex;align-items:baseline;gap:16px;flex-wrap:wrap;
+  border-bottom:1px solid var(--line);padding-bottom:12px;margin-bottom:14px;
+  /* Sticky so the data-freshness indicator stays on screen as the viewer
+     scrolls between views, which VIS-6 requires on every view rather than
+     once at the top of the page. */
+  position:sticky;top:0;background:var(--bg);z-index:20;padding-top:4px;
+}
+h1{font-size:19px;font-weight:600;letter-spacing:-0.2px}
+h1 span{color:var(--accent);font-weight:400}
+.sub{color:var(--ink-dim);font-size:12px}
+.freshness{
+  margin-left:auto;color:var(--ink-dim);font-size:11.5px;
+  display:flex;align-items:center;gap:6px;
+}
+.freshness::before{
+  content:"";width:7px;height:7px;border-radius:50%;background:var(--ok);
+}
+
+/* ---- controls ---- */
+.controls{
+  display:flex;gap:10px;flex-wrap:wrap;align-items:center;
+  background:var(--panel);border:1px solid var(--line);
+  border-radius:8px;padding:10px 12px;margin-bottom:14px;
+}
+.ctl{display:flex;align-items:center;gap:7px}
+.ctl label{color:var(--ink-dim);font-size:11.5px;text-transform:uppercase;
+  letter-spacing:0.4px}
+select,button{
+  background:var(--panel2);color:var(--ink);border:1px solid var(--line);
+  border-radius:5px;padding:5px 9px;font-size:13px;font-family:inherit;
+  cursor:pointer;
+}
+select:focus,button:focus{outline:2px solid var(--accent);outline-offset:1px}
+button:hover{border-color:var(--accent)}
+.chip{
+  background:var(--accent);color:#06131c;border-radius:12px;
+  padding:3px 10px;font-size:12px;font-weight:600;
+  display:inline-flex;align-items:center;gap:6px;
+}
+.chip button{
+  background:none;border:none;color:#06131c;padding:0;font-size:15px;
+  line-height:1;cursor:pointer;
+}
+
+/* ---- layout ---- */
+.grid{display:grid;grid-template-columns:1.15fr 1fr;gap:14px}
+.grid-3{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px}
+.panel{
+  background:var(--panel);border:1px solid var(--line);
+  border-radius:8px;padding:12px 14px;overflow:hidden;
+}
+.panel h2{
+  font-size:13px;font-weight:600;color:var(--ink);
+  display:flex;align-items:baseline;gap:8px;margin-bottom:2px;
+}
+.panel h2 em{
+  font-style:normal;font-size:10.5px;color:var(--ink-faint);
+  font-weight:400;letter-spacing:0.3px;
+}
+.panel .hint{color:var(--ink-dim);font-size:11.5px;margin-bottom:8px}
+
+/* ---- shared chart furniture ---- */
+.axis text{fill:var(--ink-dim);font-size:10px}
+.axis line,.axis path{stroke:var(--line)}
+.grid-line{stroke:var(--line);stroke-opacity:0.45}
+.legend-row{display:flex;gap:12px;flex-wrap:wrap;align-items:center;
+  margin-top:8px;font-size:11px;color:var(--ink-dim)}
+.legend-row i{width:11px;height:11px;border-radius:2px;display:inline-block;
+  margin-right:4px;vertical-align:-1px}
+.suppressed-key i{background:var(--suppressed);
+  background-image:repeating-linear-gradient(45deg,transparent,transparent 2px,
+    rgba(255,255,255,.22) 2px,rgba(255,255,255,.22) 4px)}
+
+#tooltip{
+  position:fixed;pointer-events:none;opacity:0;z-index:50;
+  background:#0a1016;border:1px solid var(--accent);border-radius:6px;
+  padding:8px 10px;font-size:12px;max-width:260px;
+  box-shadow:0 6px 20px rgba(0,0,0,.6);transition:opacity .08s;
+}
+#tooltip b{color:var(--accent)}
+#tooltip .r{display:flex;justify-content:space-between;gap:14px;
+  color:var(--ink-dim)}
+#tooltip .r span:last-child{color:var(--ink);font-variant-numeric:tabular-nums}
+
+/* ---- table ---- */
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{
+  text-align:left;color:var(--ink-dim);font-weight:500;font-size:10.5px;
+  text-transform:uppercase;letter-spacing:0.4px;padding:5px 7px;
+  border-bottom:1px solid var(--line);position:sticky;top:0;
+  background:var(--panel);cursor:pointer;
+}
+th:hover{color:var(--accent)}
+td{padding:5px 7px;border-bottom:1px solid rgba(42,55,68,.45)}
+tbody tr{cursor:pointer}
+tbody tr:hover{background:var(--panel2)}
+tbody tr.sel{background:rgba(77,163,212,.16);
+  box-shadow:inset 2px 0 0 var(--accent)}
+.num{text-align:right;font-variant-numeric:tabular-nums}
+.sev{
+  display:inline-block;min-width:38px;text-align:center;border-radius:3px;
+  padding:1px 5px;font-weight:600;font-size:11px;color:#06131c;
+}
+.suppressed-cell{color:var(--ink-faint);font-style:italic}
+.scroll{max-height:320px;overflow-y:auto}
+
+/* ---- uncertainty and suppression marks ---- */
+.band{fill:var(--accent);fill-opacity:.17}
+.band-edge{stroke:var(--accent);stroke-opacity:.4;stroke-dasharray:2 2;fill:none}
+.suppressed-rect{fill:var(--suppressed)}
+
+.loading{color:var(--ink-dim);padding:28px;text-align:center;font-size:13px}
+.err{color:var(--danger);padding:16px;font-size:12.5px;line-height:1.6}
+
+@media(max-width:1100px){
+  .grid,.grid-3{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>EpiScope <span>/ National Disease Surveillance</span></h1>
+  <div class="sub">Ministry of Health &middot; Disease Control &amp;
+    Preparedness Unit</div>
+  <div class="freshness" id="freshness">loading</div>
+</header>
+
+<div class="controls">
+  <div class="ctl">
+    <label for="disease">Disease</label>
+    <select id="disease"></select>
+  </div>
+  <div class="ctl">
+    <label for="division">Division</label>
+    <select id="division"><option value="">All divisions</option></select>
+  </div>
+  <div class="ctl">
+    <label for="metric">Map metric</label>
+    <select id="metric">
+      <option value="incidence_per_100k">Incidence per 100k</option>
+      <option value="cases">Total cases</option>
+      <option value="alert_weeks">Alert weeks</option>
+    </select>
+  </div>
+  <div id="selection"></div>
+  <button id="reset">Reset selection</button>
+</div>
+
+<div class="grid">
+  <div class="panel">
+    <h2>District incidence <em>VIEW 1 &middot; DISTRICT MAP</em></h2>
+    <div class="hint">Symbol area is population, colour is the chosen metric. Click a district to filter every other view.
+      Rings mark districts with active outbreak alerts.</div>
+    <div id="map"><div class="loading">loading</div></div>
+    <div class="legend-row" id="map-legend"></div>
+  </div>
+
+  <div class="panel">
+    <h2>Observed, forecast and alert threshold
+      <em>VIEW 2 &middot; TIME SERIES</em></h2>
+    <div class="hint">Drag across the chart to restrict every view to a
+      time range. The band is the 80% prediction interval.</div>
+    <div id="timeseries"><div class="loading">loading</div></div>
+    <div class="legend-row" id="ts-legend"></div>
+  </div>
+</div>
+
+<div class="grid-3">
+  <div class="panel">
+    <h2>Seasonal signature <em>VIEW 3 &middot; HEATMAP</em></h2>
+    <div class="hint">Mean weekly cases by district and epidemiological week,
+      averaged across study years.</div>
+    <div id="heatmap"><div class="loading">loading</div></div>
+    <div class="legend-row" id="heat-legend"></div>
+  </div>
+
+  <div class="panel">
+    <h2>Forecast demand, stock and allocation
+      <em>VIEW 4 &middot; ALLOCATION</em></h2>
+    <div class="hint">Recommended plan at the equity floor the analysis
+      selected.</div>
+    <div id="allocation"><div class="loading">loading</div></div>
+    <div class="legend-row" id="alloc-legend"></div>
+  </div>
+</div>
+
+<div class="panel" style="margin-top:14px">
+  <h2>Ranked early warnings <em>VIEW 5 &middot; ALERT TABLE</em></h2>
+  <div class="hint">Districts ordered by how far above their seasonal
+    expectation they sit. Click a row to select that district.</div>
+  <div class="scroll"><table id="warnings">
+    <thead></thead><tbody></tbody>
+  </table></div>
+</div>
+
+<div id="tooltip"></div>
+<script src="js/dashboard.js"></script>
+</body>
+</html>

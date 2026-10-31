@@ -51,6 +51,12 @@ MIN_SD = 1.0
 # hidden, because it affects sensitivity and belongs in the evaluation.
 MIN_BASELINE_MEAN = 2.0
 
+# An alert also needs enough observed cases to be worth a district officer's
+# attention. Without this, a week with ten cases against a winter expectation
+# of one scores twenty standard deviations and crowds out a genuine outbreak
+# of sixteen hundred.
+MIN_ALERT_CASES = 25
+
 
 def _ordered_window(lag_start: int, lag_end: int) -> Window:
     """
@@ -169,6 +175,8 @@ def apply_threshold(df: DataFrame, variant: str = "c2",
             .withColumn("alert_threshold", kk)
             .withColumn("alert",
                         F.when(stat.isNull(), F.lit(False))
+                         .when(F.col("cases") < F.lit(MIN_ALERT_CASES),
+                               F.lit(False))
                          .otherwise(stat >= kk))
             .withColumn("alert_method", F.lit(f"EARS-{variant.upper()}"))
             .withColumn("alert_k", F.lit(float(k))))
