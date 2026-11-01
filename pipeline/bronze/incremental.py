@@ -133,9 +133,28 @@ def conform_drop(df: DataFrame) -> DataFrame:
     # date_format(d, "YYYY") is the ISO week-based year, which pairs correctly
     # with weekofyear and matches the epi-week definition used everywhere else
     # in the lake.
+    # ISO week-based year, computed arithmetically rather than through a
+    # format pattern.
+    #
+    # date_format(d, "YYYY") is documented as the ISO week-based year, but
+    # under spark.sql.legacy.timeParserPolicy=LEGACY, which this pipeline
+    # sets for other reasons, it returns the calendar year for dates in
+    # early January. 2021-01-01 came out as (2021, 53) where ISO says
+    # (2020, 53), and 2021 has no week 53, so that partition is never
+    # created and those rows disappear silently. Late December rolled
+    # forward correctly, which is why the defect survived earlier checks.
+    #
+    # The identity used here holds by definition: the ISO year of a date is
+    # the calendar year of the Thursday in its week. Shifting each date to
+    # the Thursday of its own ISO week and taking that year is exact in both
+    # directions.
+    iso_dow = ((F.dayofweek(F.col("onset_date")) + F.lit(5))
+               % F.lit(7)) + F.lit(1)              # 1=Monday .. 7=Sunday
+    thursday = F.date_add(F.col("onset_date"),
+                          (F.lit(4) - iso_dow).cast("int"))
+
     df = (df
-          .withColumn("epi_year",
-                      F.date_format("onset_date", "YYYY").cast("int"))
+          .withColumn("epi_year", F.year(thursday).cast("int"))
           .withColumn("epi_week", F.weekofyear("onset_date").cast("long"))
           .withColumn("delay_days",
                       F.datediff("report_date", "onset_date").cast("int")))
