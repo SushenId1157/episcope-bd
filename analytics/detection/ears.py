@@ -57,6 +57,14 @@ MIN_BASELINE_MEAN = 2.0
 # of sixteen hundred.
 MIN_ALERT_CASES = 25
 
+# The operating threshold, chosen from the sweep in AN-2 rather than left as
+# a caller's default. Sensitivity is flat at 91.4% from k=3.0 to k=4.0 while
+# false alerts fall from 6.03 to 3.11 per district-year, so nothing is given
+# up by moving along the flat part of the curve. Keeping it here means the
+# pipeline, the dashboard and the report cannot disagree about which
+# detector was run.
+OPERATING_K = 4.0
+
 
 def _ordered_window(lag_start: int, lag_end: int) -> Window:
     """
